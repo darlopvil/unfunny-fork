@@ -1,4 +1,4 @@
-;; Copyright (C) 2024 Skylar Astaroth <cobra@vern.cc>
+;; Copyright (C) 2024-2025 Skylar Astaroth <cobra@vern.cc>
 ;;
 ;; This file is part of UNfunny
 ;;
