@@ -112,7 +112,7 @@
         (url ""))
     (map (lambda (p)
            (if (equal? (car p) "url")
-             (set! url (cadr p))))
+             (set! url (uri-decode (cadr p)))))
          (map (lambda (s)
                 (string-split s #\=))
               (string-split query #\&)))
