@@ -122,7 +122,8 @@
             (equal? (substring url 0 22) "https://img.ifunny.co/"))
           (and
             (>= (string-length url) 23)
-            (equal? (substring url 0 23) "https://imgb.ifunny.co/"))
+            (or (equal? (substring url 0 23) "https://imgb.ifunny.co/")
+                (equal? (substring url 0 23) "https://img.ifnapp.com/")))
           (and
             (>= (string-length url) 30)
             (equal? (substring url 0 30) "https://imgcltest10.ifunny.co/")))
