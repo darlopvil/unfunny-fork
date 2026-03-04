@@ -70,7 +70,7 @@
            ,footer)))
 
 (define (picture-template d)
-  (let* ((pref '(html body div div div div div div img @))
+  (let* ((pref '(html body div main div div div div img @))
          (src (car ((sxpath (append pref '(src *text*))) d)))
          (alt (car ((sxpath (append pref '(alt *text*))) d))))
     `(html ,(html-head alt)
