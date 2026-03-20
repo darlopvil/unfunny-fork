@@ -32,6 +32,3 @@ The following are optional.
 `PORT` - What port to run on (default `8004`).
 
 `VIPS_PATH` - Path to `libvips.so` (default similar to below).
-
-## Notes
-When using a service manager (e.g. systemd), make sure the stop signal is set to SIGINT, or 2. This will prevent EADDRINUSE.
