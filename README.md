@@ -20,7 +20,7 @@ You will need need `guile`, `guile-gnutls`, `guile-lib`, and `libvips` (for remo
 ## Running
 0. Install the dependencies
 1. Clone the repository using `git clone --recurse-submodules https://git.vern.cc/cobra/UNfunny`
-2. Run `guile -L . unfunny.scm`
+2. Run `guile unfunny.scm`
 3. Connect to http://localhost:8004 (or point your reverse proxy to it)
 4. Profit
 

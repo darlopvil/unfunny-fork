@@ -15,6 +15,8 @@
 ;; You should have received a copy of the GNU Affero General Public License
 ;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+(add-to-load-path (dirname (current-filename)))
+
 (define-module (unfunny)
   #:use-module (unfunny pages)
   #:use-module (unfunny vips)
