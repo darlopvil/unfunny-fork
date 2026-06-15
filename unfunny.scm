@@ -63,12 +63,23 @@
       ((or
          (and
            (>= (length path-components) 1)
-           (equal? (car path-components) "picture"))
+           (or (equal? (car path-components) "picture")
+               (equal? (car path-components) "meme")))
          (and
            (>= (length path-components) 2)
            (equal? (car path-components) "br")
-           (equal? (cadr path-components) "picture")))
+           (or (equal? (cadr path-components) "picture")
+               (equal? (cadr path-components) "meme"))))
        (picture-page path))
+;      ((or
+;         (and
+;           (>= (length path-components) 1)
+;           (equal? (car path-components) "video"))
+;         (and
+;           (>= (length path-components) 2)
+;           (equal? (car path-components) "br")
+;           (equal? (car path-components) "video")))
+;       (video-page path))
       (else (error-page 501)))))
 
 (install-suspendable-ports!)

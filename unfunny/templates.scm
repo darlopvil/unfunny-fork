@@ -20,7 +20,8 @@
   #:use-module (htmlprag)
   #:export (error-template
             index-template
-            picture-template))
+            picture-template
+            video-template))
 
 (define (html-head title)
   `(head (title ,title " - UNfunny")
@@ -81,6 +82,27 @@
                      (src ,(string-append
                              "/proxy?url="
                              src))))
+             ,footer))))
+
+(define (video-template d)
+  (let* ((pref '(html body div main div div div div div video @))
+         (src (car ((sxpath (append pref '(data-src *text*))) d)))
+         (poster (car ((sxpath (append pref '(data-poster *text*))) d)))
+         (alt (car ((sxpath (append pref '(aria-label *text*))) d))))
+    `(html ,(html-head alt)
+           (body
+             ,heading
+             (h1 ,alt)
+             (video (@ (alt ,alt)
+		       (loop "loop")
+		       (controls)
+		       (preload "auto")
+		       (poster ,(string-append
+                                  "/proxy?vid&url="
+                                  poster))
+                       (src ,(string-append
+                               "/proxy?vid&url="
+                               src))))
              ,footer))))
 
 (define (error-template code)

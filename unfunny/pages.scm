@@ -30,6 +30,7 @@
   #:export (error-page
             index-page
             picture-page
+            video-page
             proxy-page))
 
 (define good-response
@@ -55,15 +56,11 @@
 (define (generic-page procedure path)
   (let ((resp "")
         (body "")
-        (sub
-          (cond
-            ((equal? (substring path 0 4) "/br/") "br.")
-            (else ""))))
+        (url (if (string-prefix? "/br/" path)
+               (string-append "https://br.ifunny.co" (string-drop path 3))
+               (string-append "https://ifunny.co" path))))
     (receive (_resp _body)
-             (http-request (string-append
-                             "https://" sub "ifunny.co"
-                             (if (equal? (substring path 0 4) "/br/")
-                               (substring path 3) path)))
+             (http-request url)
              (set! resp _resp)
              (set! body _body))
     (display (string-append ";\tStatus: "
@@ -82,6 +79,10 @@
 (define (picture-page path)
   (display ";\tHandler: picture-page")
   (generic-page picture-template path))
+
+(define (video-page path)
+  (display ";\tHandler: video-page")
+  (generic-page video-template path))
 
 (define (index-page host)
   (display ";\tHandler: index-page") (newline)
@@ -109,24 +110,21 @@
   (display ";\tHandler: proxy-page") (newline)
   (let ((resp "")
         (body "")
-        (url ""))
+        (url "")
+        (vid #f))
     (map (lambda (p)
            (if (equal? (car p) "url")
-             (set! url (uri-decode (cadr p)))))
+             (set! url (uri-decode (cadr p))))
+           (if (equal? (car p) "vid")
+             (set! vid #t)))
          (map (lambda (s)
                 (string-split s #\=))
               (string-split query #\&)))
-    (if (or
-          (and
-            (>= (string-length url) 22)
-            (equal? (substring url 0 22) "https://img.ifunny.co/"))
-          (and
-            (>= (string-length url) 23)
-            (or (equal? (substring url 0 23) "https://imgb.ifunny.co/")
-                (equal? (substring url 0 23) "https://img.ifnapp.com/")))
-          (and
-            (>= (string-length url) 30)
-            (equal? (substring url 0 30) "https://imgcltest10.ifunny.co/")))
+    (if (or (string-prefix? "https://img.ifunny.co/" url)
+            (string-prefix? "https://imgb.ifunny.co/" url)
+            (string-prefix? "https://img.ifnapp.com/" url)
+            (string-prefix? "https://imgcltest10.ifunny.co/" url)
+            (string-prefix? "https://img.getfn.io/" url))
       (begin
         (receive (_resp _body) (http-request url)
                  (set! resp _resp)
@@ -140,7 +138,7 @@
                                  (cache-control .
                                   ,(parse-header 'cache-control
                                                  "max-age=604800"))))
-                   (crop body)))
+                   (if vid body (crop body))))
           ((and (>= (response-code resp) 300) (<= (response-code resp) 399))
            (values (build-response
                      #:code (response-code resp)
