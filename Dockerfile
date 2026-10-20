@@ -7,7 +7,6 @@ RUN apt-get update \
         guile-3.0 \
         guile-library \
         guile-gnutls \
-        libvips42t64 \
         ca-certificates \
         netbase \
         tini \
@@ -23,7 +22,6 @@ COPY --chown=unfunny:unfunny static ./static
 USER unfunny
 
 ENV PORT=8004
-ENV VIPS_PATH=libvips.so.42
 EXPOSE 8004
 
 ENTRYPOINT ["tini", "--"]

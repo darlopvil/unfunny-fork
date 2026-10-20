@@ -1,4 +1,5 @@
 ;; Copyright (C) 2024-2025 Skylar Astaroth <cobra@vern.cc>
+;; Copyright (C) 2026 darlopvil (modified for unfunny-fork)
 ;;
 ;; This file is part of UNfunny
 ;;
@@ -17,7 +18,6 @@
 
 (define-module (unfunny pages)
   #:use-module (unfunny templates)
-  #:use-module (unfunny vips)
   #:use-module (htmlprag)
   #:use-module (web response)
   #:use-module (web client)
@@ -25,8 +25,6 @@
   #:use-module (web uri)
   #:use-module (ice-9 receive)
   #:use-module (ice-9 string-fun)
-  #:use-module ((rnrs) #:prefix rnrs:)
-  #:use-module (system foreign)
   #:export (error-page
             index-page
             picture-page
@@ -88,23 +86,14 @@
   (display ";\tHandler: index-page") (newline)
   (values good-response (shtml->html (index-template host))))
 
-(define (crop image)
-  (if (not (file-exists? "/tmp/unfunny"))
-    (mkdir "/tmp/unfunny"))
-  (define in (vips-image-new-from-buffer
-               (bytevector->pointer image)
-               (array-length image)
-               (string->pointer "")
-               %null-pointer))
-  (define out (bytevector->pointer (rnrs:make-bytevector 0)))
-  (vips-extract-area in out 0 0 (vips-image-get-width in)
-                     (- (vips-image-get-height in) 20) %null-pointer)
-  (define buf (bytevector->pointer (rnrs:make-bytevector 0)))
-  (define len (rnrs:make-bytevector (sizeof size_t)))
-  (vips-pngsave-buffer (dereference-pointer out)
-                       buf (bytevector->pointer len) %null-pointer)
-  (pointer->bytevector (dereference-pointer buf)
-                       (rnrs:bytevector-u64-native-ref len 0)))
+;; iFunny's own image service crops the 20px watermark strip off the bottom
+;; of a picture and returns it in its original format, so nothing has to be
+;; decoded here.
+(define (watermark-free-url url)
+  (let ((uri (string->uri url)))
+    (if (and uri (string-prefix? "/images/" (uri-path uri)))
+      (string-append "https://imageproxy.getfn.io/crop:x-20" (uri-path uri))
+      url)))
 
 (define (proxy-page query)
   (display ";\tHandler: proxy-page") (newline)
@@ -126,7 +115,8 @@
             (string-prefix? "https://imgcltest10.ifunny.co/" url)
             (string-prefix? "https://img.getfn.io/" url))
       (begin
-        (receive (_resp _body) (http-request url)
+        (receive (_resp _body)
+                 (http-request (if vid url (watermark-free-url url)))
                  (set! resp _resp)
                  (set! body _body))
         (cond
@@ -138,7 +128,7 @@
                                  (cache-control .
                                   ,(parse-header 'cache-control
                                                  "max-age=604800"))))
-                   (if vid body (crop body))))
+                   body))
           ((and (>= (response-code resp) 300) (<= (response-code resp) 399))
            (values (build-response
                      #:code (response-code resp)

@@ -1,4 +1,5 @@
 ;; Copyright (C) 2024-2025 Skylar Astaroth <cobra@vern.cc>
+;; Copyright (C) 2026 darlopvil (modified for unfunny-fork)
 ;;
 ;; This file is part of UNfunny
 ;;
@@ -19,7 +20,6 @@
 
 (define-module (unfunny)
   #:use-module (unfunny pages)
-  #:use-module (unfunny vips)
   #:use-module (web server)
   #:use-module (web uri)
   #:use-module (web request)
@@ -84,8 +84,6 @@
 
 (install-suspendable-ports!)
 
-(init-vips)
-
 (let ((port (if (getenv "PORT")
               (string->number (getenv "PORT"))
               8004))
@@ -95,5 +93,3 @@
   (fcntl sock F_SETFL (logior O_NONBLOCK
                               (fcntl sock F_GETFL)))
   (run-server handler 'http `(#:socket ,sock)))
-
-(vips-shutdown)
