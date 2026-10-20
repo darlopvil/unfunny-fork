@@ -20,6 +20,7 @@
   #:use-module (unfunny scraping)
   #:use-module (htmlprag)
   #:use-module (web uri)
+  #:use-module (ice-9 regex)
   #:use-module (srfi srfi-1)
   #:export (error-template
             home-template
@@ -102,6 +103,44 @@
                  '())
              (span (@ (class "title")) ,title)))))
 
+;; Where the next page of a feed is, following iFunny's own routes for them:
+;; /page<N> for Featured, /tags/<tag>/<cursor> and /user/<nick>/timeline/
+;; <cursor>.  Those routes only take numeric cursors, the ones tags and
+;; profiles use.  #f when there is no next page.
+(define (next-page-path state)
+  (let* ((route (ref state "route" "name"))
+         (params (ref state "route" "params"))
+         (next (ref state "feed" "pagination" "next"))
+         (cursor? (lambda (pattern)
+                    (and (eq? (ref state "feed" "pagination" "hasNext") #t)
+                         (string? next)
+                         (string-match pattern next)))))
+    (cond
+      ((member route '("PageFeed" "PagePaginatedFeed"))
+       (let ((page (or (and (string? (ref params "page"))
+                            (string->number (ref params "page")))
+                       1))
+             (pages (ref state "feed" "pageCount")))
+         (and (integer? pages)
+              (< page pages)
+              (string-append "/page" (number->string (1+ page))))))
+      ((and (member route '("PageTag" "PagePaginatedTag"))
+            (non-empty-string? (ref params "tag"))
+            (cursor? "^[0-9]{10}$"))
+       (string-append "/tags/" (uri-encode (ref params "tag")) "/" next))
+      ((and (member route '("PageUser" "PagePaginatedUser"))
+            (non-empty-string? (ref params "nick"))
+            (cursor? "^[0-9]{10}(\\.[0-9]{1,5})?$"))
+       (string-append "/user/" (uri-encode (ref params "nick"))
+                      "/timeline/" next))
+      (else #f))))
+
+(define (next-link state)
+  (let ((path (next-page-path state)))
+    (if path
+      `((p (@ (class "next")) (a (@ (href ,path)) "Next page")))
+      '())))
+
 (define (feed-grid state)
   (let* ((items (ref state "feed" "items"))
          (cards (if (vector? items)
@@ -120,7 +159,8 @@
            ,@(if state
                `(,(channel-nav state)
                  (h1 "Featured")
-                 ,(feed-grid state))
+                 ,(feed-grid state)
+                 ,@(next-link state))
                '((nav (@ (class "channels"))
                       (a (@ (href "/")) "Featured"))
                  (h1 "Featured")
@@ -162,9 +202,10 @@
                    '()
                    `((p (@ (class "counters")) ,(string-join counters " · ")))))
              ,(feed-grid state)
+             ,@(next-link state)
              ,footer))))
 
-;; A channel or a tag (and, later, any other feed).
+;; A channel, a tag or a further page of Featured.
 (define (feed-template state)
   (let ((name (let ((name (ref state "feed" "name")))
                 (if (non-empty-string? name) name "Featured"))))
@@ -174,6 +215,7 @@
              ,(channel-nav state)
              (h1 ,name)
              ,(feed-grid state)
+             ,@(next-link state)
              ,footer))))
 
 ;; STATE is the page's parsed __INITIAL_STATE__ (see (unfunny scraping)).

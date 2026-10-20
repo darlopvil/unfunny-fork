@@ -24,6 +24,7 @@
   #:use-module (web uri)
   #:use-module (web request)
   #:use-module (web http)
+  #:use-module (ice-9 regex)
   #:use-module (ice-9 textual-ports)
   #:use-module (ice-9 binary-ports))
 
@@ -61,10 +62,18 @@
       ((and (= (length path-components) 2)
             (equal? (car path-components) "channels"))
        (channel-page path))
-      ((and (= (length path-components) 2)
+      ;; Further pages of Featured: /page2, /page3...
+      ((and (= (length path-components) 1)
+            (string-match "^page[0-9]+$" (car path-components)))
+       (featured-page path))
+      ;; Tags and profiles, and their further pages:
+      ;; /tags/<tag>/<cursor> and /user/<nick>/timeline/<cursor>.
+      ((and (memv (length path-components) '(2 3))
             (equal? (car path-components) "tags"))
        (tag-page path))
-      ((and (= (length path-components) 2)
+      ((and (or (= (length path-components) 2)
+                (and (= (length path-components) 4)
+                     (equal? (caddr path-components) "timeline")))
             (equal? (car path-components) "user"))
        (user-page path))
       ;; Posts, at any of iFunny's paths for them (also under /br/ for iFunny

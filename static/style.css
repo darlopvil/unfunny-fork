@@ -100,3 +100,8 @@ footer {
 	flex-wrap: wrap;
 	gap: .2em .8em;
 }
+
+.next {
+	font-size: 1.2em;
+	margin: 0 0 2em;
+}

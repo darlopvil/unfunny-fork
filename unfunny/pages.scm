@@ -30,6 +30,7 @@
   #:export (error-page
             home-page
             channel-page
+            featured-page
             tag-page
             user-page
             post-page
@@ -142,6 +143,10 @@
 
 (define (channel-page path)
   (display ";\tHandler: channel-page")
+  (generic-page feed-template path feed-ttl))
+
+(define (featured-page path)
+  (display ";\tHandler: featured-page")
   (generic-page feed-template path feed-ttl))
 
 (define (tag-page path)
