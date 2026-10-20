@@ -17,7 +17,7 @@
 ;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 (define-module (unfunny templates)
-  #:use-module (sxml xpath)
+  #:use-module (unfunny scraping)
   #:use-module (htmlprag)
   #:export (error-template
             index-template
@@ -81,39 +81,35 @@
            (pre (code "https://" ,host "/br/picture/WEatpqh3B"))
            ,footer)))
 
-(define (picture-template d)
-  (let* ((pref '(html body div main div div div div img @))
-         (src (car ((sxpath (append pref '(src *text*))) d)))
-         (alt (car ((sxpath (append pref '(alt *text*))) d))))
-    `(html ,(html-head alt)
+;; STATE is the page's parsed __INITIAL_STATE__ (see (unfunny scraping)).
+(define (picture-template state)
+  (let* ((item (post-item state))
+         (title (post-title item)))
+    `(html ,(html-head title)
            (body
              ,heading
-             (h1 ,alt)
-             (img (@ (alt ,alt)
-                     (src ,(string-append
-                             "/proxy?url="
-                             src))))
+             (h1 ,title)
+             (img (@ (alt ,title)
+                     (src ,(proxy (ref item "url")))))
              ,footer))))
 
-(define (video-template d)
-  (let* ((pref '(html body div main div div div div div video @))
-         (src (car ((sxpath (append pref '(data-src *text*))) d)))
-         (poster (car ((sxpath (append pref '(data-poster *text*))) d)))
-         (alt (car ((sxpath (append pref '(aria-label *text*))) d))))
-    `(html ,(html-head alt)
+(define (video-template state)
+  (let* ((item (post-item state))
+         (title (post-title item))
+         (poster (ref item "screen")))
+    `(html ,(html-head title)
            (body
              ,heading
-             (h1 ,alt)
-             (video (@ (alt ,alt)
-		       (loop "loop")
-		       (controls)
-		       (preload "auto")
-		       (poster ,(string-append
-                                  "/proxy?vid&url="
-                                  poster))
-                       (src ,(string-append
-                               "/proxy?vid&url="
-                               src))))
+             (h1 ,title)
+             (video (@ (aria-label ,title)
+                       (loop "loop")
+                       (controls)
+                       (preload "auto")
+                       ,@(if (and (string? poster)
+                                  (not (string-null? poster)))
+                           `((poster ,(proxy poster #t)))
+                           '())
+                       (src ,(proxy (ref item "url") #t))))
              ,footer))))
 
 (define (error-message code)

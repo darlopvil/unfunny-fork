@@ -17,6 +17,7 @@
 ;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 (define-module (unfunny pages)
+  #:use-module (unfunny scraping)
   #:use-module (unfunny templates)
   #:use-module (unfunny upstream)
   #:use-module (htmlprag)
@@ -97,11 +98,10 @@
         (display (string-append ";\tStatus: "
                                 (number->string (response-code resp))))
         (cond ((equal? (response-code resp) 200)
-               (let ((doc (html->sxml-0nf body #:strict? #t)))
-                 (values good-response
-                         (string-replace-substring
-                           (shtml->html (procedure doc))
-                           "&amp;" "&"))))
+               (values good-response
+                       (string-replace-substring
+                         (shtml->html (procedure (initial-state body)))
+                         "&amp;" "&")))
               ((and (>= (response-code resp) 300)
                     (<= (response-code resp) 399))
                (redirect resp (response-code resp)))

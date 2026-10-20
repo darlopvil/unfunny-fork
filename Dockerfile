@@ -7,6 +7,7 @@ RUN apt-get update \
         guile-3.0 \
         guile-library \
         guile-gnutls \
+        guile-json \
         ca-certificates \
         netbase \
         tini \
