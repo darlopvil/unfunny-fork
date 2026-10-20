@@ -1,4 +1,5 @@
 ;; Copyright (C) 2024-2025 Skylar Astaroth <cobra@vern.cc>
+;; Copyright (C) 2026 darlopvil (modified for unfunny-fork)
 ;;
 ;; This file is part of UNfunny
 ;;
@@ -105,9 +106,20 @@
                                src))))
              ,footer))))
 
+(define (error-message code)
+  (case code
+    ((400) "Bad request.")
+    ((404) "Not found.")
+    ((502) "iFunny could not be reached, or sent something UNfunny could not read.")
+    ((503) "iFunny is refusing requests from this instance right now. Try again later.")
+    ((504) "iFunny took too long to answer.")
+    (else #f)))
+
 (define (error-template code)
   `(html ,(html-head (number->string code))
          (body
            ,heading
            (h1 ,(number->string code))
+           ,(let ((message (error-message code)))
+              (if message `(p ,message) '()))
            ,footer)))

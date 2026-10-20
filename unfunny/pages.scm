@@ -45,34 +45,68 @@
           "Redirect"))
 
 (define (error-page code)
-  (display ";\tHandler: error-page") (newline)
   (values (build-response
             #:code code
             #:headers `((content-type . (text/html))))
           (shtml->html (error-template code))))
 
+;; Raw (undecoded) value of KEY in a query string, or #f.  Tolerates a
+;; missing query, empty parts and parameters without '='.
+(define (query-ref query key)
+  (let ((prefix (string-append key "=")))
+    (and query
+         (let loop ((parts (string-split query #\&)))
+           (cond ((null? parts) #f)
+                 ((string-prefix? prefix (car parts))
+                  (substring (car parts) (string-length prefix)))
+                 (else (loop (cdr parts))))))))
+
+;; What to answer when iFunny answers CODE instead of the page or file.
+(define (upstream-status code)
+  (cond ((memv code '(404 410)) 404)
+        ((memv code '(403 429)) 503)
+        (else 502)))
+
+;; Runs THUNK, which talks to iFunny and builds a response.  Any failure,
+;; including a page that cannot be read, becomes an error page (504 on
+;; timeout, 502 otherwise) instead of an uncaught exception, which Guile
+;; answers with a blank 500.
+(define (with-upstream-errors thunk)
+  (catch #t
+    thunk
+    (lambda (key . args)
+      (display (string-append
+                 ";\tUpstream: " (symbol->string key)
+                 (if (pair? args)
+                   (string-append " (" (object->string (car args)) ")")
+                   "")))
+      (error-page (if (eq? key 'upstream-timeout) 504 502)))))
+
 (define (generic-page procedure path)
-  (let ((resp "")
-        (body "")
-        (url (if (string-prefix? "/br/" path)
-               (string-append "https://br.ifunny.co" (string-drop path 3))
-               (string-append "https://ifunny.co" path))))
-    (receive (_resp _body)
-             (fetch url)
-             (set! resp _resp)
-             (set! body _body))
-    (display (string-append ";\tStatus: "
-                            (number->string (response-code resp))))
-    (newline)
-    (cond ((equal? (response-code resp) 200)
-           (let ((doc (html->sxml-0nf body #:strict? #t)))
-             (values good-response
-                     (string-replace-substring
-                       (shtml->html (procedure doc))
-                       "&amp;" "&"))))
-          ((and (>= (response-code resp) 300) (<= (response-code resp) 399))
-           (redirect resp (response-code resp)))
-          (else (error-page (response-code resp))))))
+  (with-upstream-errors
+    (lambda ()
+      (let ((resp "")
+            (body "")
+            (url (if (string-prefix? "/br/" path)
+                   (string-append "https://br.ifunny.co" (string-drop path 3))
+                   (string-append "https://ifunny.co" path))))
+        (receive (_resp _body)
+                 (fetch url)
+                 (set! resp _resp)
+                 (set! body _body))
+        (display (string-append ";\tStatus: "
+                                (number->string (response-code resp))))
+        (cond ((equal? (response-code resp) 200)
+               (let ((doc (html->sxml-0nf body #:strict? #t)))
+                 (values good-response
+                         (string-replace-substring
+                           (shtml->html (procedure doc))
+                           "&amp;" "&"))))
+              ((and (>= (response-code resp) 300)
+                    (<= (response-code resp) 399))
+               (redirect resp (response-code resp)))
+              (else
+               (error-page (upstream-status (response-code resp)))))))))
 
 (define (picture-page path)
   (display ";\tHandler: picture-page")
@@ -83,7 +117,7 @@
   (generic-page video-template path))
 
 (define (index-page host)
-  (display ";\tHandler: index-page") (newline)
+  (display ";\tHandler: index-page")
   (values good-response (shtml->html (index-template host))))
 
 ;; iFunny's own image service crops the 20px watermark strip off the bottom
@@ -96,29 +130,25 @@
       url)))
 
 (define (proxy-page query)
-  (display ";\tHandler: proxy-page") (newline)
+  (display ";\tHandler: proxy-page")
   (let ((resp "")
         (body "")
-        (url "")
-        (vid #f))
-    (map (lambda (p)
-           (if (equal? (car p) "url")
-             (set! url (uri-decode (cadr p))))
-           (if (equal? (car p) "vid")
-             (set! vid #t)))
-         (map (lambda (s)
-                (string-split s #\=))
-              (string-split query #\&)))
+        (url (let ((raw (query-ref query "url")))
+               (if raw (uri-decode raw) "")))
+        (vid (and query (member "vid" (string-split query #\&)) #t)))
     (if (or (string-prefix? "https://img.ifunny.co/" url)
             (string-prefix? "https://imgb.ifunny.co/" url)
             (string-prefix? "https://img.ifnapp.com/" url)
             (string-prefix? "https://imgcltest10.ifunny.co/" url)
             (string-prefix? "https://img.getfn.io/" url))
-      (begin
+      (with-upstream-errors
+       (lambda ()
         (receive (_resp _body)
                  (fetch (if vid url (watermark-free-url url)))
                  (set! resp _resp)
                  (set! body _body))
+        (display (string-append ";\tStatus: "
+                                (number->string (response-code resp))))
         (cond
           ((equal? (response-code resp) 200)
            (values (build-response
@@ -140,5 +170,5 @@
                                  (content-type .
                                   ,(response-content-type resp))))
                    "Redirect"))
-          (else (error-page 404))))
+          (else (error-page (upstream-status (response-code resp)))))))
       (error-page 400))))

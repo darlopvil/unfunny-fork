@@ -30,15 +30,19 @@
 (define (handler request request-body)
   (let ((uri (request-uri request))
         (path (uri-path (request-uri request)))
+        ;; #f when the path holds broken percent-encoding ("/picture/%zz").
         (path-components
-          (split-and-decode-uri-path
-            (uri-path
-              (request-uri request)))))
+          (false-if-exception
+            (split-and-decode-uri-path
+              (uri-path
+                (request-uri request))))))
 
     (display (string-append
                (strftime "%c" (localtime (current-time)))
                ": " (uri->string uri)))
     (cond
+      ((not path-components)
+       (error-page 400))
       ((equal? path "/style.css")
        (display ";\tHandler: internal") (newline)
        (values `((content-type . (text/css)))
@@ -79,7 +83,7 @@
 ;           (equal? (car path-components) "br")
 ;           (equal? (car path-components) "video")))
 ;       (video-page path))
-      (else (error-page 501)))))
+      (else (error-page 404)))))
 
 (let ((port (if (getenv "PORT")
               (string->number (getenv "PORT"))
