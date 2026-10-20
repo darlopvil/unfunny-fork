@@ -57,12 +57,10 @@
       ((equal? path "/proxy")
        (proxy-page (uri-query uri)))
       ((equal? path "/")
-       (let ((host (request-host request)))
-         (if (cdr host)
-           (index-page (string-append
-                         (car host) ":"
-                         (number->string (cdr host))))
-           (index-page (car host)))))
+       (home-page))
+      ((and (= (length path-components) 2)
+            (equal? (car path-components) "channels"))
+       (channel-page path))
       ;; Posts, at any of iFunny's paths for them (also under /br/ for iFunny
       ;; Brazil).  The page shows each post according to its real type.
       ((let ((parts (if (and (pair? path-components)

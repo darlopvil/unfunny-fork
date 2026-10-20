@@ -19,8 +19,10 @@
 (define-module (unfunny templates)
   #:use-module (unfunny scraping)
   #:use-module (htmlprag)
+  #:use-module (srfi srfi-1)
   #:export (error-template
-            index-template
+            home-template
+            feed-template
             post-template))
 
 (define (html-head title)
@@ -31,7 +33,7 @@
          (link (@ (rel "icon") (type "image/png") (href "/favicon.png")))))
 
 (define heading
-  `(header))
+  `(header (a (@ (class "brand") (href "/")) "UNfunny")))
 
 ;; Value of the environment variable NAME, or #f when it is unset or empty.
 (define (env name)
@@ -46,39 +48,95 @@
 (define footer
   `(footer
      (p (a (@ (href ,source-url))
-           "Source Code"))
+           "Source Code")
+        " · Fork of "
+        (a (@ (href "https://codeberg.org/cobra/UNfunny"))
+           "UNfunny")
+        " by Skylar Astaroth")
      ,(if (env "PATCHES_URL")
         `(p (a (@ (href ,(env "PATCHES_URL")))
                "Patches"))
         `())))
 
-(define (index-template host)
-  `(html ,(html-head "UNfunny")
+;; Links to Featured and to every channel iFunny lists in its pages.
+(define (channel-nav state)
+  (let ((channels (ref state "channels")))
+    `(nav (@ (class "channels"))
+          (a (@ (href "/")) "Featured")
+          ,@(if (vector? channels)
+              (filter-map
+                (lambda (channel)
+                  (let ((name (ref channel "name"))
+                        (path (ref channel "path")))
+                    (and (non-empty-string? name)
+                         (non-empty-string? path)
+                         `(a (@ (href ,(string-append "/channels/" path)))
+                             ,name))))
+                (vector->list channels))
+              '()))))
+
+;; A post in a feed: its preview, linking to its UNfunny page.  Previews are
+;; iFunny's 320px thumbnails (the watermark already cropped off pictures),
+;; never videos.  #f for posts that cannot be linked or shown.
+(define (feed-card item)
+  (let ((link (local-path (ref item "canonical")))
+        (thumb (ref item "thumb" "p"))
+        (width (ref item "thumb" "pSize" "w"))
+        (height (ref item "thumb" "pSize" "h"))
+        (title (post-title item)))
+    (and link
+         (non-empty-string? thumb)
+         `(a (@ (class "card") (href ,link))
+             (img (@ (src ,(proxy thumb))
+                     (alt ,title)
+                     (loading "lazy")
+                     ,@(if (and (integer? width) (integer? height))
+                         `((width ,(number->string width))
+                           (height ,(number->string height)))
+                         '())))
+             ,@(if (video-post? item)
+                 `((span (@ (class "kind"))
+                         ,(if (gif-post? item) "GIF" "Video")))
+                 '())
+             (span (@ (class "title")) ,title)))))
+
+(define (feed-grid state)
+  (let* ((items (ref state "feed" "items"))
+         (cards (if (vector? items)
+                  (filter-map feed-card (vector->list items))
+                  '())))
+    (if (null? cards)
+      '(p "No posts.")
+      `(div (@ (class "feed")) ,@cards))))
+
+;; The home page: iFunny's Featured feed.  STATE is #f when the feed could not
+;; be loaded; the page still answers then.
+(define (home-template state)
+  `(html ,(html-head "Featured")
          (body
            ,heading
-           (h1 "UNfunny")
-           (h4 "iFunny? more like UNfunny!!!!")
-           (p "UNfunny is a privacy-respecting front-end to iFunny.")
-           (br)
-           (h2 "Usage")
-           (p "You can use UNfunny by replacing " (code "ifunny.com")
-              " with this website's domain")
-           (h3 "Example")
-           (pre (code
-                  "https://ifunny.co/picture/get-how-the-"
-                  "orangutans-have-gun-in-their-exhibit-why-aPrZa5Al9"))
-           (p "becomes")
-           (pre (code
-                  "https://" ,host "/picture/get-how-the-"
-                  "orangutans-have-gun-in-their-exhibit-why-aPrZa5Al9"))
-           (br)
-           (p "For iFunny Brazil links, replace the domain as usual, but "
-              "add /br to the beginning of the path")
-           (h3 "Example")
-           (pre (code "https://br.ifunny.co/picture/WEatpqh3B"))
-           (p "becomes")
-           (pre (code "https://" ,host "/br/picture/WEatpqh3B"))
+           ,@(if state
+               `(,(channel-nav state)
+                 (h1 "Featured")
+                 ,(feed-grid state))
+               '((nav (@ (class "channels"))
+                      (a (@ (href "/")) "Featured"))
+                 (h1 "Featured")
+                 (p "The Featured feed could not be loaded from iFunny right "
+                    "now. Post links keep working; try again in a minute.")))
            ,footer)))
+
+;; A channel (and, later, any other feed).
+(define (feed-template state)
+  (let ((name (let ((name (ref state "feed" "name")))
+                (if (non-empty-string? name) name "Featured"))))
+    `(html ,(html-head name)
+           (body
+             ,heading
+             ,(channel-nav state)
+             (h1 ,name)
+             ,(feed-grid state)
+             ,footer))))
 
 ;; STATE is the page's parsed __INITIAL_STATE__ (see (unfunny scraping)).
 (define (post-template state)

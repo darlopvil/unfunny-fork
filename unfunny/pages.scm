@@ -28,7 +28,8 @@
   #:use-module (ice-9 receive)
   #:use-module (ice-9 string-fun)
   #:export (error-page
-            index-page
+            home-page
+            channel-page
             post-page
             proxy-page))
 
@@ -84,21 +85,30 @@
       (error-page (if (eq? key 'upstream-timeout) 504 502)))))
 
 ;; How long a rendered page stays cached, in seconds.  A post hardly ever
-;; changes (only its counters do).
+;; changes (only its counters do); feeds move faster.  When Featured cannot be
+;; loaded, the home page says so for a minute before asking iFunny again.
 (define post-ttl 3600)
+(define feed-ttl 600)
+(define home-failure-ttl 60)
+
+(define (render shtml)
+  (string-replace-substring (shtml->html shtml) "&amp;" "&"))
+
+;; The cached page under KEY, or else the result of THUNK, which renders it
+;; (and caches it if it wants to).  Concurrent misses share one THUNK call.
+(define (cached-page key thunk)
+  (let ((cached (cache-ref key)))
+    (if cached
+      (begin
+        (display ";\tCache: hit")
+        (values good-response cached))
+      (shared-flight key thunk (lambda () (error-page 502))))))
 
 ;; Pages are cached by path: the same path always maps to the same iFunny
 ;; page.  Only successful pages are stored, so a failure is retried on the
 ;; next visit instead of sticking.
 (define (generic-page procedure path ttl)
-  (let ((cached (cache-ref path)))
-    (if cached
-      (begin
-        (display ";\tCache: hit")
-        (values good-response cached))
-      (shared-flight path
-                     (lambda () (generic-page* procedure path ttl))
-                     (lambda () (error-page 502))))))
+  (cached-page path (lambda () (generic-page* procedure path ttl))))
 
 (define (generic-page* procedure path ttl)
   (with-upstream-errors
@@ -115,9 +125,7 @@
         (display (string-append ";\tStatus: "
                                 (number->string (response-code resp))))
         (cond ((equal? (response-code resp) 200)
-               (let ((html (string-replace-substring
-                             (shtml->html (procedure (initial-state body)))
-                             "&amp;" "&")))
+               (let ((html (render (procedure (initial-state body)))))
                  (cache-put! path html ttl)
                  (values good-response html)))
               ((and (>= (response-code resp) 300)
@@ -130,9 +138,37 @@
   (display ";\tHandler: post-page")
   (generic-page post-template path post-ttl))
 
-(define (index-page host)
-  (display ";\tHandler: index-page")
-  (values good-response (shtml->html (index-template host))))
+(define (channel-page path)
+  (display ";\tHandler: channel-page")
+  (generic-page feed-template path feed-ttl))
+
+;; The home page always answers: if Featured cannot be loaded it still shows
+;; the usage instructions, with a note instead of the feed.
+(define (home-page)
+  (display ";\tHandler: home-page")
+  (let ((key "home"))
+    (cached-page
+      key
+      (lambda ()
+        (let* ((state (catch #t
+                        (lambda ()
+                          (receive (response body) (fetch "https://ifunny.co/")
+                            (display (string-append
+                                       ";\tStatus: "
+                                       (number->string (response-code response))))
+                            (and (= (response-code response) 200)
+                                 (initial-state body))))
+                        (lambda (key . args)
+                          (display (string-append ";\tUpstream: "
+                                                  (symbol->string key)))
+                          #f)))
+               (html (catch #t
+                       (lambda () (render (home-template state)))
+                       (lambda _
+                         (set! state #f)
+                         (render (home-template #f))))))
+          (cache-put! key html (if state feed-ttl home-failure-ttl))
+          (values good-response html))))))
 
 ;; iFunny's own image service crops the 20px watermark strip off the bottom
 ;; of a picture and returns it in its original format, so nothing has to be
@@ -157,7 +193,8 @@
             (string-prefix? "https://imgb.ifunny.co/" url)
             (string-prefix? "https://img.ifnapp.com/" url)
             (string-prefix? "https://imgcltest10.ifunny.co/" url)
-            (string-prefix? "https://img.getfn.io/" url))
+            (string-prefix? "https://img.getfn.io/" url)
+            (string-prefix? "https://imageproxy.getfn.io/" url))
       (with-upstream-errors
        (lambda ()
         (receive (_resp _body)

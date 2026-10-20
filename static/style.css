@@ -28,3 +28,59 @@ a {
 	color: #fc0;
 	text-decoration: none;
 }
+
+nav.channels {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .2em 1em;
+	margin: 1em 0;
+}
+
+.feed {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(9em, 1fr));
+	gap: 1.5em 1em;
+	align-items: start;
+	margin-bottom: 2em;
+}
+
+.feed .card {
+	display: flex;
+	flex-direction: column;
+	color: inherit;
+}
+
+.feed img {
+	width: 100%;
+	height: auto;
+	max-width: none;
+	max-height: none;
+}
+
+.feed .kind {
+	color: #fc0;
+	font-size: .75em;
+	text-transform: uppercase;
+	margin-top: .3em;
+}
+
+.feed .title {
+	font-size: .85em;
+	line-height: 1.3em;
+	margin-top: .3em;
+	overflow-wrap: anywhere;
+}
+
+header {
+	padding: 1em 0 .2em;
+}
+
+header .brand {
+	font-size: 1.6em;
+	font-weight: bold;
+}
+
+footer {
+	margin: 2em 0 1em;
+	font-size: .85em;
+}

@@ -35,6 +35,7 @@
             non-empty-string?
             video-post?
             gif-post?
+            local-path
             proxy))
 
 (define state-marker "window.__INITIAL_STATE__=")
@@ -93,6 +94,16 @@
 (define (gif-post? item)
   (let ((type (ref item "type")))
     (and (string? type) (string-contains type "gif") #t)))
+
+;; "https://ifunny.co/picture/..." -> "/picture/...", and iFunny Brazil's
+;; "https://br.ifunny.co/..." -> "/br/...".  #f for anything else.
+(define (local-path url)
+  (let ((uri (and (string? url) (string->uri url))))
+    (and uri
+         (cond ((equal? (uri-host uri) "ifunny.co") (uri-path uri))
+               ((equal? (uri-host uri) "br.ifunny.co")
+                (string-append "/br" (uri-path uri)))
+               (else #f)))))
 
 ;; Characters left as they are in the url parameter of proxy links.  ':' and
 ;; '/' are safe inside a query and keep the links readable; everything else
