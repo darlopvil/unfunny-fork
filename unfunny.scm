@@ -63,26 +63,15 @@
                          (car host) ":"
                          (number->string (cdr host))))
            (index-page (car host)))))
-      ((or
-         (and
-           (>= (length path-components) 1)
-           (or (equal? (car path-components) "picture")
-               (equal? (car path-components) "meme")))
-         (and
-           (>= (length path-components) 2)
-           (equal? (car path-components) "br")
-           (or (equal? (cadr path-components) "picture")
-               (equal? (cadr path-components) "meme"))))
-       (picture-page path))
-;      ((or
-;         (and
-;           (>= (length path-components) 1)
-;           (equal? (car path-components) "video"))
-;         (and
-;           (>= (length path-components) 2)
-;           (equal? (car path-components) "br")
-;           (equal? (car path-components) "video")))
-;       (video-page path))
+      ;; Posts, at any of iFunny's paths for them (also under /br/ for iFunny
+      ;; Brazil).  The page shows each post according to its real type.
+      ((let ((parts (if (and (pair? path-components)
+                             (equal? (car path-components) "br"))
+                      (cdr path-components)
+                      path-components)))
+         (and (>= (length parts) 2)
+              (member (car parts) '("picture" "meme" "video" "gif"))))
+       (post-page path))
       (else (error-page 404)))))
 
 (let ((port (if (getenv "PORT")

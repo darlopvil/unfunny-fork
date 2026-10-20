@@ -32,6 +32,9 @@
             ref
             post-item
             post-title
+            non-empty-string?
+            video-post?
+            gif-post?
             proxy))
 
 (define state-marker "window.__INITIAL_STATE__=")
@@ -78,6 +81,18 @@
               (ref item "fixedTitle")
               (ref item "id")
               "Untitled")))
+
+;; Videos and iFunny's GIFs are mp4 files; everything else (picture,
+;; text_pic...) is an image.  Deciding by the file rather than by the type
+;; keeps working when iFunny adds another variant of either.
+(define (video-post? item)
+  (let ((uri (and (string? (ref item "url")) (string->uri (ref item "url")))))
+    (and uri (string-suffix? ".mp4" (uri-path uri)))))
+
+;; "gif", "text_gif"...
+(define (gif-post? item)
+  (let ((type (ref item "type")))
+    (and (string? type) (string-contains type "gif") #t)))
 
 ;; Characters left as they are in the url parameter of proxy links.  ':' and
 ;; '/' are safe inside a query and keep the links readable; everything else

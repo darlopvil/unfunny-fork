@@ -28,8 +28,7 @@
   #:use-module (ice-9 string-fun)
   #:export (error-page
             index-page
-            picture-page
-            video-page
+            post-page
             proxy-page))
 
 (define good-response
@@ -108,13 +107,9 @@
               (else
                (error-page (upstream-status (response-code resp)))))))))
 
-(define (picture-page path)
-  (display ";\tHandler: picture-page")
-  (generic-page picture-template path))
-
-(define (video-page path)
-  (display ";\tHandler: video-page")
-  (generic-page video-template path))
+(define (post-page path)
+  (display ";\tHandler: post-page")
+  (generic-page post-template path))
 
 (define (index-page host)
   (display ";\tHandler: index-page")
@@ -122,10 +117,13 @@
 
 ;; iFunny's own image service crops the 20px watermark strip off the bottom
 ;; of a picture and returns it in its original format, so nothing has to be
-;; decoded here.
+;; decoded here.  Videos are left alone: iFunny's GIFs are mp4 files stored
+;; under /images/ too, and the image service refuses them.
 (define (watermark-free-url url)
   (let ((uri (string->uri url)))
-    (if (and uri (string-prefix? "/images/" (uri-path uri)))
+    (if (and uri
+             (string-prefix? "/images/" (uri-path uri))
+             (not (string-suffix? ".mp4" (uri-path uri))))
       (string-append "https://imageproxy.getfn.io/crop:x-20" (uri-path uri))
       url)))
 

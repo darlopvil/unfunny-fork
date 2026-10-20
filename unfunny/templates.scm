@@ -21,8 +21,7 @@
   #:use-module (htmlprag)
   #:export (error-template
             index-template
-            picture-template
-            video-template))
+            post-template))
 
 (define (html-head title)
   `(head (title ,title " - UNfunny")
@@ -82,9 +81,14 @@
            ,footer)))
 
 ;; STATE is the page's parsed __INITIAL_STATE__ (see (unfunny scraping)).
-(define (picture-template state)
-  (let* ((item (post-item state))
-         (title (post-title item)))
+(define (post-template state)
+  (let ((item (post-item state)))
+    (if (video-post? item)
+      (video-template item)
+      (picture-template item))))
+
+(define (picture-template item)
+  (let ((title (post-title item)))
     `(html ,(html-head title)
            (body
              ,heading
@@ -93,20 +97,23 @@
                      (src ,(proxy (ref item "url")))))
              ,footer))))
 
-(define (video-template state)
-  (let* ((item (post-item state))
-         (title (post-title item))
-         (poster (ref item "screen")))
+;; Videos never autoplay: browsers that block autoplay, even muted, must
+;; work without the visitor changing any setting.  Nothing but the poster is
+;; downloaded until the visitor presses play.  iFunny's GIFs are mp4 files
+;; too: they play muted and loop, so once started they behave like a GIF.
+(define (video-template item)
+  (let ((title (post-title item))
+        (poster (ref item "screen")))
     `(html ,(html-head title)
            (body
              ,heading
              (h1 ,title)
              (video (@ (aria-label ,title)
-                       (loop "loop")
                        (controls)
-                       (preload "auto")
-                       ,@(if (and (string? poster)
-                                  (not (string-null? poster)))
+                       (loop "loop")
+                       ,@(if (gif-post? item) '((muted)) '())
+                       (preload "none")
+                       ,@(if (non-empty-string? poster)
                            `((poster ,(proxy poster #t)))
                            '())
                        (src ,(proxy (ref item "url") #t))))
