@@ -34,12 +34,22 @@
 (define heading
   `(header))
 
+;; Value of the environment variable NAME, or #f when it is unset or empty.
+(define (env name)
+  (let ((value (getenv name)))
+    (and value (not (string-null? value)) value)))
+
+;; The AGPL requires offering users the source of the code the instance runs.
+;; Anyone running a modified copy points SOURCE_URL at their own source.
+(define source-url
+  (or (env "SOURCE_URL") "https://github.com/darlopvil/unfunny-fork"))
+
 (define footer
   `(footer
-     (p (a (@ (href "https://git.vern.cc/cobra/UNfunny"))
+     (p (a (@ (href ,source-url))
            "Source Code"))
-     ,(if (getenv "PATCHES_URL")
-        `(p (a (@ (href ,(getenv "PATCHES_URL")))
+     ,(if (env "PATCHES_URL")
+        `(p (a (@ (href ,(env "PATCHES_URL")))
                "Patches"))
         `())))
 
