@@ -1,0 +1,10 @@
+services:
+  unfunny:
+    build: .
+    image: unfunny:local
+    container_name: unfunny
+    restart: unless-stopped
+    environment:
+      - PORT=8004
+    ports:
+      - "127.0.0.1:8004:8004"
