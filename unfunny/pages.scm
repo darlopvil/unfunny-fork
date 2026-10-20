@@ -30,6 +30,8 @@
   #:export (error-page
             home-page
             channel-page
+            tag-page
+            user-page
             post-page
             proxy-page))
 
@@ -141,6 +143,14 @@
 (define (channel-page path)
   (display ";\tHandler: channel-page")
   (generic-page feed-template path feed-ttl))
+
+(define (tag-page path)
+  (display ";\tHandler: tag-page")
+  (generic-page feed-template path feed-ttl))
+
+(define (user-page path)
+  (display ";\tHandler: user-page")
+  (generic-page user-template path feed-ttl))
 
 ;; The home page always answers: if Featured cannot be loaded it still shows
 ;; the usage instructions, with a note instead of the feed.

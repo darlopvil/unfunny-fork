@@ -84,3 +84,19 @@ footer {
 	margin: 2em 0 1em;
 	font-size: .85em;
 }
+
+.profile {
+	display: flex;
+	align-items: center;
+	gap: 1em;
+}
+
+.profile img {
+	border-radius: 50%;
+}
+
+.tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .2em .8em;
+}

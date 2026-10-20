@@ -61,6 +61,12 @@
       ((and (= (length path-components) 2)
             (equal? (car path-components) "channels"))
        (channel-page path))
+      ((and (= (length path-components) 2)
+            (equal? (car path-components) "tags"))
+       (tag-page path))
+      ((and (= (length path-components) 2)
+            (equal? (car path-components) "user"))
+       (user-page path))
       ;; Posts, at any of iFunny's paths for them (also under /br/ for iFunny
       ;; Brazil).  The page shows each post according to its real type.
       ((let ((parts (if (and (pair? path-components)

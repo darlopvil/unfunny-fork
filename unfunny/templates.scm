@@ -19,10 +19,12 @@
 (define-module (unfunny templates)
   #:use-module (unfunny scraping)
   #:use-module (htmlprag)
+  #:use-module (web uri)
   #:use-module (srfi srfi-1)
   #:export (error-template
             home-template
             feed-template
+            user-template
             post-template))
 
 (define (html-head title)
@@ -126,7 +128,43 @@
                     "now. Post links keep working; try again in a minute.")))
            ,footer)))
 
-;; A channel (and, later, any other feed).
+;; A user's profile: avatar, nick, bio and counters, then their posts.
+(define (user-template state)
+  (let* ((user (ref state "user" "data"))
+         (nick (ref user "nick"))
+         (avatar (ref user "avatar" "s"))
+         (about (ref user "about"))
+         (subscribers (ref user "subscribers"))
+         (featured (ref user "featured")))
+    (unless (non-empty-string? nick)
+      (throw 'user-missing))
+    `(html ,(html-head nick)
+           (body
+             ,heading
+             ,(channel-nav state)
+             (div (@ (class "profile"))
+                  ,@(if (non-empty-string? avatar)
+                      `((img (@ (src ,(proxy avatar))
+                                (alt "")
+                                (width "100")
+                                (height "100"))))
+                      '())
+                  (h1 ,nick))
+             ,@(if (non-empty-string? about) `((p ,about)) '())
+             ,@(let ((counters
+                       (filter-map
+                         (lambda (count label)
+                           (and (integer? count)
+                                (string-append (number->string count) " " label)))
+                         (list subscribers featured)
+                         '("subscribers" "featured"))))
+                 (if (null? counters)
+                   '()
+                   `((p (@ (class "counters")) ,(string-join counters " · ")))))
+             ,(feed-grid state)
+             ,footer))))
+
+;; A channel or a tag (and, later, any other feed).
 (define (feed-template state)
   (let ((name (let ((name (ref state "feed" "name")))
                 (if (non-empty-string? name) name "Featured"))))
@@ -145,6 +183,27 @@
       (video-template item)
       (picture-template item))))
 
+;; Below a post: who posted it and its tags, linking to their UNfunny pages.
+(define (post-links item)
+  (let ((nick (ref item "creator" "nick"))
+        (tags (ref item "tags")))
+    `(,@(if (non-empty-string? nick)
+          `((p (@ (class "author"))
+               "by " (a (@ (href ,(string-append "/user/" (uri-encode nick))))
+                        ,nick)))
+          '())
+      ,@(let ((tags (if (vector? tags)
+                      (filter non-empty-string? (vector->list tags))
+                      '())))
+          (if (null? tags)
+            '()
+            `((p (@ (class "tags"))
+                 ,@(map (lambda (tag)
+                          `(a (@ (href ,(string-append "/tags/"
+                                                       (uri-encode tag))))
+                              "#" ,tag))
+                        tags))))))))
+
 (define (picture-template item)
   (let ((title (post-title item)))
     `(html ,(html-head title)
@@ -153,6 +212,7 @@
              (h1 ,title)
              (img (@ (alt ,title)
                      (src ,(proxy (ref item "url")))))
+             ,@(post-links item)
              ,footer))))
 
 ;; Videos never autoplay: browsers that block autoplay, even muted, must
@@ -175,6 +235,7 @@
                            `((poster ,(proxy poster #t)))
                            '())
                        (src ,(proxy (ref item "url") #t))))
+             ,@(post-links item)
              ,footer))))
 
 (define (error-message code)
