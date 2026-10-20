@@ -21,18 +21,21 @@
   #:use-module (unfunny templates)
   #:use-module (unfunny upstream)
   #:use-module (unfunny cache)
+  #:use-module (unfunny session)
   #:use-module (htmlprag)
   #:use-module (web response)
   #:use-module (web http)
   #:use-module (web uri)
   #:use-module (ice-9 receive)
   #:use-module (ice-9 string-fun)
+  #:use-module (srfi srfi-1)
   #:export (error-page
             home-page
             channel-page
             featured-page
             tag-page
             user-page
+            channel-next-page
             post-page
             proxy-page))
 
@@ -74,8 +77,8 @@
 
 ;; Runs THUNK, which talks to iFunny and builds a response.  Any failure,
 ;; including a page that cannot be read, becomes an error page (504 on
-;; timeout, 502 otherwise) instead of an uncaught exception, which Guile
-;; answers with a blank 500.
+;; timeout, 503 when iFunny's API refuses the instance, 502 otherwise)
+;; instead of an uncaught exception, which Guile answers with a blank 500.
 (define (with-upstream-errors thunk)
   (catch #t
     thunk
@@ -85,7 +88,10 @@
                  (if (pair? args)
                    (string-append " (" (object->string (car args)) ")")
                    "")))
-      (error-page (if (eq? key 'upstream-timeout) 504 502)))))
+      (error-page (case key
+                    ((upstream-timeout) 504)
+                    ((api-error) 503)
+                    (else 502))))))
 
 ;; How long a rendered page stays cached, in seconds.  A post hardly ever
 ;; changes (only its counters do); feeds move faster.  When Featured cannot be
@@ -125,10 +131,14 @@
                  (fetch url)
                  (set! resp _resp)
                  (set! body _body))
+        (remember-cookies! resp)
         (display (string-append ";\tStatus: "
                                 (number->string (response-code resp))))
         (cond ((equal? (response-code resp) 200)
-               (let ((html (render (procedure (initial-state body)))))
+               (let* ((state (initial-state body))
+                      (html (begin
+                              (note-channels! state)
+                              (render (procedure state)))))
                  (cache-put! path html ttl)
                  (values good-response html)))
               ((and (>= (response-code resp) 300)
@@ -153,9 +163,101 @@
   (display ";\tHandler: tag-page")
   (generic-page feed-template path feed-ttl))
 
+;; iFunny's channel list, as last seen in one of its pages.  Further pages of
+;; channels come from the API, whose answers do not include it.
+(define known-channels #())
+
+(define (note-channels! state)
+  (let ((channels (ref state "channels")))
+    (when (and (vector? channels) (> (vector-length channels) 0))
+      (set! known-channels channels))))
+
+;; Fetches one of iFunny's HTML pages only for the session it sets.
+(define (renew-session path)
+  (lambda ()
+    (receive (response body) (fetch (string-append "https://ifunny.co" path))
+      (display (string-append ";\tSession: "
+                              (number->string (response-code response))))
+      (remember-cookies! response))))
+
+;; STATE with its feed's items and pagination replaced.
+(define (with-feed state items pagination)
+  (acons "feed"
+         (acons "items" (list->vector items)
+                (acons "pagination" pagination
+                       (remove (lambda (entry)
+                                 (member (car entry) '("items" "pagination")))
+                               (or (ref state "feed") '()))))
+         (remove (lambda (entry) (equal? (car entry) "feed")) state)))
+
+;; A profile's pages hold very few posts (often 1 to 3, it is iFunny's page
+;; size).  The rest of the timeline comes from the API, so each UNfunny page
+;; gathers up to timeline-target posts with at most timeline-calls more
+;; requests.  Any failure just stops gathering: what is there is shown.
+(define timeline-target 10)
+(define timeline-calls 3)
+
+(define (gather-timeline state)
+  (let ((nick (ref state "user" "data" "nick")))
+    (let loop ((items (let ((items (ref state "feed" "items")))
+                        (if (vector? items) (vector->list items) '())))
+               (pagination (ref state "feed" "pagination"))
+               (calls 0))
+      (let ((next (ref pagination "next")))
+        (if (and (< (length items) timeline-target)
+                 (< calls timeline-calls)
+                 (non-empty-string? nick)
+                 (eq? (ref pagination "hasNext") #t)
+                 (non-empty-string? next)
+                 (api-available?))
+          (let ((data (catch #t
+                        (lambda ()
+                          (api-get (string-append "/v1/user/" (uri-encode nick)
+                                                  "/timeline/" next)
+                                   (renew-session
+                                     (string-append "/user/" (uri-encode nick)))))
+                        (lambda _ #f))))
+            (if (and data (vector? (ref data "items")))
+              (loop (append items (vector->list (ref data "items")))
+                    (ref data "pagination")
+                    (1+ calls))
+              (with-feed state items pagination)))
+          (with-feed state items pagination))))))
+
 (define (user-page path)
   (display ";\tHandler: user-page")
-  (generic-page user-template path feed-ttl))
+  (generic-page (lambda (state) (user-template (gather-timeline state)))
+                path feed-ttl))
+
+;; Further pages of a channel, from the API (its HTML routes do not take the
+;; cursors channels use).  CURSOR was checked by the caller.
+(define (channel-next-page path channel cursor)
+  (display ";\tHandler: channel-next-page")
+  (cached-page
+    path
+    (lambda ()
+      (with-upstream-errors
+        (lambda ()
+          (let* ((data (api-get (string-append "/v1/feeds/channels/"
+                                               (uri-encode channel)
+                                               "?next=" cursor)
+                                (renew-session
+                                  (string-append "/channels/"
+                                                 (uri-encode channel)))))
+                 (name (or (any (lambda (known)
+                                  (and (equal? (ref known "path") channel)
+                                       (ref known "name")))
+                                (vector->list known-channels))
+                           channel))
+                 (state `(("channels" . ,known-channels)
+                          ("feed" . (("items" . ,(or (ref data "items") #()))
+                                     ("pagination" . ,(ref data "pagination"))
+                                     ("name" . ,name)))
+                          ("route" . (("name" . "PagePaginatedChannel")
+                                      ("params" . (("channel" . ,channel)))))))
+                 (html (render (feed-template state))))
+            (cache-put! path html feed-ttl)
+            (values good-response html)))))))
 
 ;; The home page always answers: if Featured cannot be loaded it still shows
 ;; the usage instructions, with a note instead of the feed.
@@ -168,6 +270,7 @@
         (let* ((state (catch #t
                         (lambda ()
                           (receive (response body) (fetch "https://ifunny.co/")
+                            (remember-cookies! response)
                             (display (string-append
                                        ";\tStatus: "
                                        (number->string (response-code response))))

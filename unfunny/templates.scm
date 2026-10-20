@@ -18,6 +18,7 @@
 
 (define-module (unfunny templates)
   #:use-module (unfunny scraping)
+  #:use-module (unfunny session)
   #:use-module (htmlprag)
   #:use-module (web uri)
   #:use-module (ice-9 regex)
@@ -106,7 +107,10 @@
 ;; Where the next page of a feed is, following iFunny's own routes for them:
 ;; /page<N> for Featured, /tags/<tag>/<cursor> and /user/<nick>/timeline/
 ;; <cursor>.  Those routes only take numeric cursors, the ones tags and
-;; profiles use.  #f when there is no next page.
+;; profiles use.  Channels use hex cursors that only iFunny's API takes, so
+;; their /channels/<channel>/<cursor> pages are UNfunny's own, and their
+;; link is hidden while the API refuses requests.  #f when there is no next
+;; page.
 (define (next-page-path state)
   (let* ((route (ref state "route" "name"))
          (params (ref state "route" "params"))
@@ -128,6 +132,12 @@
             (non-empty-string? (ref params "tag"))
             (cursor? "^[0-9]{10}$"))
        (string-append "/tags/" (uri-encode (ref params "tag")) "/" next))
+      ((and (member route '("PageChannel" "PagePaginatedChannel"))
+            (non-empty-string? (ref params "channel"))
+            (cursor? "^[0-9a-f]{24}$")
+            (api-available?))
+       (string-append "/channels/" (uri-encode (ref params "channel"))
+                      "/" next))
       ((and (member route '("PageUser" "PagePaginatedUser"))
             (non-empty-string? (ref params "nick"))
             (cursor? "^[0-9]{10}(\\.[0-9]{1,5})?$"))

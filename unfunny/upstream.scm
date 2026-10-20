@@ -97,11 +97,11 @@
                      'connect)
               (loop (cdr addresses) timed-out?))))))))
 
-;; Same contract as (http-request url): returns the response and its body.
-;; Every failure is rethrown as 'upstream-timeout when a timeout or the
-;; deadline was hit, and as 'upstream-error otherwise, with the original
-;; error key as its argument.
-(define (fetch url)
+;; Same contract as (http-request url #:headers HEADERS): returns the
+;; response and its body.  Every failure is rethrown as 'upstream-timeout
+;; when a timeout or the deadline was hit, and as 'upstream-error otherwise,
+;; with the original error key as its argument.
+(define* (fetch url #:key (headers '()))
   (let ((start (current-time)))
     (catch #t
       (lambda ()
@@ -112,7 +112,9 @@
             (const #t)
             (lambda ()
               (setvbuf sock 'block 65536)
-              (http-request uri #:port (tls-wrap sock (uri-host uri))))
+              (http-request uri
+                            #:port (tls-wrap sock (uri-host uri))
+                            #:headers headers))
             (lambda ()
               (unwatch! sock)
               (close-port sock)))))

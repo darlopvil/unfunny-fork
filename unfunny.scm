@@ -62,6 +62,12 @@
       ((and (= (length path-components) 2)
             (equal? (car path-components) "channels"))
        (channel-page path))
+      ((and (= (length path-components) 3)
+            (equal? (car path-components) "channels"))
+       (if (string-match "^[0-9a-f]{24}$" (caddr path-components))
+         (channel-next-page path (cadr path-components)
+                            (caddr path-components))
+         (error-page 404)))
       ;; Further pages of Featured: /page2, /page3...
       ((and (= (length path-components) 1)
             (string-match "^page[0-9]+$" (car path-components)))
