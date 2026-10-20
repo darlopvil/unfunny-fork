@@ -20,11 +20,10 @@
 
 (define-module (unfunny)
   #:use-module (unfunny pages)
-  #:use-module (web server)
+  #:use-module (unfunny server)
   #:use-module (web uri)
   #:use-module (web request)
   #:use-module (web http)
-  #:use-module (ice-9 suspendable-ports)
   #:use-module (ice-9 textual-ports)
   #:use-module (ice-9 binary-ports))
 
@@ -82,14 +81,10 @@
 ;       (video-page path))
       (else (error-page 501)))))
 
-(install-suspendable-ports!)
-
 (let ((port (if (getenv "PORT")
               (string->number (getenv "PORT"))
               8004))
       (sock (socket PF_INET SOCK_STREAM 0)))
   (setsockopt sock SOL_SOCKET SO_REUSEPORT 1)
   (bind sock AF_INET INADDR_ANY port)
-  (fcntl sock F_SETFL (logior O_NONBLOCK
-                              (fcntl sock F_GETFL)))
-  (run-server handler 'http `(#:socket ,sock)))
+  (run-threaded-server handler sock))

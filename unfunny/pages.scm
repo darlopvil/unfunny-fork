@@ -18,9 +18,9 @@
 
 (define-module (unfunny pages)
   #:use-module (unfunny templates)
+  #:use-module (unfunny upstream)
   #:use-module (htmlprag)
   #:use-module (web response)
-  #:use-module (web client)
   #:use-module (web http)
   #:use-module (web uri)
   #:use-module (ice-9 receive)
@@ -58,7 +58,7 @@
                (string-append "https://br.ifunny.co" (string-drop path 3))
                (string-append "https://ifunny.co" path))))
     (receive (_resp _body)
-             (http-request url)
+             (fetch url)
              (set! resp _resp)
              (set! body _body))
     (display (string-append ";\tStatus: "
@@ -116,7 +116,7 @@
             (string-prefix? "https://img.getfn.io/" url))
       (begin
         (receive (_resp _body)
-                 (http-request (if vid url (watermark-free-url url)))
+                 (fetch (if vid url (watermark-free-url url)))
                  (set! resp _resp)
                  (set! body _body))
         (cond
