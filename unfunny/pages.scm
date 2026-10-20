@@ -20,6 +20,7 @@
   #:use-module (unfunny scraping)
   #:use-module (unfunny templates)
   #:use-module (unfunny upstream)
+  #:use-module (unfunny cache)
   #:use-module (htmlprag)
   #:use-module (web response)
   #:use-module (web http)
@@ -82,7 +83,24 @@
                    "")))
       (error-page (if (eq? key 'upstream-timeout) 504 502)))))
 
-(define (generic-page procedure path)
+;; How long a rendered page stays cached, in seconds.  A post hardly ever
+;; changes (only its counters do).
+(define post-ttl 3600)
+
+;; Pages are cached by path: the same path always maps to the same iFunny
+;; page.  Only successful pages are stored, so a failure is retried on the
+;; next visit instead of sticking.
+(define (generic-page procedure path ttl)
+  (let ((cached (cache-ref path)))
+    (if cached
+      (begin
+        (display ";\tCache: hit")
+        (values good-response cached))
+      (shared-flight path
+                     (lambda () (generic-page* procedure path ttl))
+                     (lambda () (error-page 502))))))
+
+(define (generic-page* procedure path ttl)
   (with-upstream-errors
     (lambda ()
       (let ((resp "")
@@ -97,10 +115,11 @@
         (display (string-append ";\tStatus: "
                                 (number->string (response-code resp))))
         (cond ((equal? (response-code resp) 200)
-               (values good-response
-                       (string-replace-substring
-                         (shtml->html (procedure (initial-state body)))
-                         "&amp;" "&")))
+               (let ((html (string-replace-substring
+                             (shtml->html (procedure (initial-state body)))
+                             "&amp;" "&")))
+                 (cache-put! path html ttl)
+                 (values good-response html)))
               ((and (>= (response-code resp) 300)
                     (<= (response-code resp) 399))
                (redirect resp (response-code resp)))
@@ -109,7 +128,7 @@
 
 (define (post-page path)
   (display ";\tHandler: post-page")
-  (generic-page post-template path))
+  (generic-page post-template path post-ttl))
 
 (define (index-page host)
   (display ";\tHandler: index-page")
