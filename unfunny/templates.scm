@@ -236,26 +236,79 @@
       (video-template item)
       (picture-template item))))
 
-;; Below a post: who posted it and its tags, linking to their UNfunny pages.
-(define (post-links item)
-  (let ((nick (ref item "creator" "nick"))
-        (tags (ref item "tags")))
-    `(,@(if (non-empty-string? nick)
-          `((p (@ (class "author"))
-               "by " (a (@ (href ,(string-append "/user/" (uri-encode nick))))
-                        ,nick)))
-          '())
-      ,@(let ((tags (if (vector? tags)
-                      (filter non-empty-string? (vector->list tags))
-                      '())))
-          (if (null? tags)
-            '()
-            `((p (@ (class "tags"))
-                 ,@(map (lambda (tag)
-                          `(a (@ (href ,(string-append "/tags/"
-                                                       (uri-encode tag))))
-                              "#" ,tag))
-                        tags))))))))
+;; "1792469302" -> "2026-10-20", the date iFunny published a post (UTC).
+(define (post-date item)
+  (let ((published (ref item "published")))
+    (and (integer? published)
+         (> published 0)
+         (strftime "%Y-%m-%d" (gmtime published)))))
+
+(define (count-label n singular plural)
+  (string-append (number->string n) " " (if (= n 1) singular plural)))
+
+;; Below a post: author, date and counters, its tags, and links to the
+;; original and to the file itself.
+(define (post-details item)
+  (let* ((nick (ref item "creator" "nick"))
+         (avatar (ref item "creator" "avatar" "s"))
+         (date (post-date item))
+         (smiles (ref item "smiles"))
+         (comments (ref item "comments"))
+         (tags (let ((tags (ref item "tags")))
+                 (if (vector? tags)
+                   (filter non-empty-string? (vector->list tags))
+                   '())))
+         (original (ref item "canonical"))
+         (video? (video-post? item))
+         (facts (filter-map
+                  identity
+                  (list date
+                        (and (integer? smiles)
+                             (count-label smiles "smile" "smiles"))
+                        (and (integer? comments)
+                             (count-label comments "comment" "comments"))))))
+    `((div (@ (class "details"))
+           ,@(if (non-empty-string? nick)
+               `((p (@ (class "author"))
+                    (a (@ (href ,(string-append "/user/" (uri-encode nick))))
+                       ,@(if (non-empty-string? avatar)
+                           `((img (@ (src ,(proxy avatar))
+                                     (alt "")
+                                     (width "32")
+                                     (height "32"))))
+                           '())
+                       ,nick)))
+               '())
+           ,@(if (null? facts)
+               '()
+               `((p (@ (class "facts")) ,(string-join facts " · "))))
+           ,@(if (null? tags)
+               '()
+               `((p (@ (class "tags"))
+                    ,@(map (lambda (tag)
+                             `(a (@ (href ,(string-append "/tags/"
+                                                          (uri-encode tag))))
+                                 "#" ,tag))
+                           tags))))
+           (p (@ (class "links"))
+              (a (@ (href ,(proxy (ref item "url") video?))
+                    (download ""))
+                 ,(if video? "Download video" "Download image"))
+              ,@(if (non-empty-string? original)
+                  `(" · " (a (@ (href ,original)
+                                (rel "noreferrer"))
+                             "View on iFunny"))
+                  '()))))))
+
+;; Width and height let the browser reserve the media's space before it
+;; loads, so the page does not jump.  Pictures lose the 20px watermark strip.
+(define (size-attributes item crop)
+  (let ((width (ref item "size" "w"))
+        (height (ref item "size" "h")))
+    (if (and (integer? width) (integer? height) (> height crop))
+      `((width ,(number->string width))
+        (height ,(number->string (- height crop))))
+      '())))
 
 (define (picture-template item)
   (let ((title (post-title item)))
@@ -263,9 +316,11 @@
            (body
              ,heading
              (h1 ,title)
-             (img (@ (alt ,title)
-                     (src ,(proxy (ref item "url")))))
-             ,@(post-links item)
+             (img (@ (class "media")
+                     (alt ,title)
+                     (src ,(proxy (ref item "url")))
+                     ,@(size-attributes item 20)))
+             ,@(post-details item)
              ,footer))))
 
 ;; Videos never autoplay: browsers that block autoplay, even muted, must
@@ -279,7 +334,8 @@
            (body
              ,heading
              (h1 ,title)
-             (video (@ (aria-label ,title)
+             (video (@ (class "media")
+                       (aria-label ,title)
                        (controls)
                        (loop "loop")
                        ,@(if (gif-post? item) '((muted)) '())
@@ -287,8 +343,9 @@
                        ,@(if (non-empty-string? poster)
                            `((poster ,(proxy poster #t)))
                            '())
-                       (src ,(proxy (ref item "url") #t))))
-             ,@(post-links item)
+                       (src ,(proxy (ref item "url") #t))
+                       ,@(size-attributes item 0)))
+             ,@(post-details item)
              ,footer))))
 
 (define (error-message code)
