@@ -27,7 +27,6 @@
   #:use-module (web http)
   #:use-module (web uri)
   #:use-module (ice-9 receive)
-  #:use-module (ice-9 string-fun)
   #:use-module (srfi srfi-1)
   #:export (error-page
             home-page
@@ -43,14 +42,44 @@
   (build-response #:code 200
                   #:headers `((content-type . (text/html)))))
 
-(define (redirect response code)
-  (values (build-response #:code code
-                          #:headers `((location . ,(parse-header
-                                                     'location
-                                                     (uri-path
-                                                       (response-location
-                                                         response))))))
-          "Redirect"))
+;; Where a redirect from iFunny points, as an absolute URI.  BASE is the URI
+;; that was requested; Locations may be relative to it.  #f when there is no
+;; usable Location.
+(define (redirect-target response base)
+  (let ((location (response-location response)))
+    (cond ((not location) #f)
+          ((uri-host location)
+           (build-uri (or (uri-scheme location) (uri-scheme base))
+                      #:host (uri-host location)
+                      #:port (uri-port location)
+                      #:path (uri-path location)
+                      #:query (uri-query location)))
+          ((string-prefix? "/" (uri-path location))
+           (build-uri (uri-scheme base)
+                      #:host (uri-host base)
+                      #:path (uri-path location)
+                      #:query (uri-query location)))
+          (else #f))))
+
+;; A redirect from iFunny's pages, followed within UNfunny: the visitor goes
+;; to the same page on this instance.  Redirects off iFunny are refused.
+(define (redirect response code base)
+  (let* ((target (redirect-target response base))
+         (path (and target
+                    (local-path (uri->string
+                                  (build-uri 'https
+                                             #:host (uri-host target)
+                                             #:path (uri-path target)))))))
+    (if path
+      (values (build-response
+                #:code code
+                #:headers `((location . ,(string->uri-reference
+                                           (if (uri-query target)
+                                             (string-append path "?"
+                                                            (uri-query target))
+                                             path)))))
+              "Redirect")
+      (error-page 502))))
 
 (define (error-page code)
   (values (build-response
@@ -100,8 +129,10 @@
 (define feed-ttl 600)
 (define home-failure-ttl 60)
 
+;; shtml->html escapes '&' in text and leaves it as it is in attribute values,
+;; where browsers read it fine, so the HTML is served as it comes.
 (define (render shtml)
-  (string-replace-substring (shtml->html shtml) "&amp;" "&"))
+  (shtml->html shtml))
 
 ;; The cached page under KEY, or else the result of THUNK, which renders it
 ;; (and caches it if it wants to).  Concurrent misses share one THUNK call.
@@ -143,7 +174,7 @@
                  (values good-response html)))
               ((and (>= (response-code resp) 300)
                     (<= (response-code resp) 399))
-               (redirect resp (response-code resp)))
+               (redirect resp (response-code resp) (string->uri url)))
               (else
                (error-page (upstream-status (response-code resp)))))))))
 
@@ -397,47 +428,53 @@
       (string-append "https://imageproxy.getfn.io/crop:x-20" (uri-path uri))
       url)))
 
+;; The only hosts the media proxy fetches from: iFunny's media servers.
+(define media-hosts
+  '("img.ifunny.co" "imgb.ifunny.co" "img.ifnapp.com" "imgcltest10.ifunny.co"
+    "img.getfn.io" "imageproxy.getfn.io"))
+
+(define (media-uri? uri)
+  (and uri
+       (eq? (uri-scheme uri) 'https)
+       (not (uri-userinfo uri))
+       (not (uri-port uri))
+       (member (uri-host uri) media-hosts)
+       #t))
+
+;; Fetches a media file, following up to 3 redirects as long as they stay
+;; on iFunny's media hosts.  Returns the final response and its body.
+(define (fetch-media uri)
+  (let loop ((uri uri) (redirects 0))
+    (receive (response body) (fetch (uri->string uri))
+      (let ((code (response-code response)))
+        (if (and (>= code 300) (<= code 399))
+          (let ((target (redirect-target response uri)))
+            (if (and target (media-uri? target) (< redirects 3))
+              (loop target (1+ redirects))
+              (throw 'upstream-error 'redirect)))
+          (values response body))))))
+
 (define (proxy-page query)
   (display ";\tHandler: proxy-page")
-  (let ((resp "")
-        (body "")
-        (url (let ((raw (query-ref query "url")))
-               (if raw (uri-decode raw) "")))
-        (vid (and query (member "vid" (string-split query #\&)) #t)))
-    (if (or (string-prefix? "https://img.ifunny.co/" url)
-            (string-prefix? "https://imgb.ifunny.co/" url)
-            (string-prefix? "https://img.ifnapp.com/" url)
-            (string-prefix? "https://imgcltest10.ifunny.co/" url)
-            (string-prefix? "https://img.getfn.io/" url)
-            (string-prefix? "https://imageproxy.getfn.io/" url))
+  (let* ((url (let ((raw (query-ref query "url")))
+                (and raw (false-if-exception (uri-decode raw)))))
+         (uri (and url (string->uri url)))
+         (vid (and query (member "vid" (string-split query #\&)) #t)))
+    (if (media-uri? uri)
       (with-upstream-errors
-       (lambda ()
-        (receive (_resp _body)
-                 (fetch (if vid url (watermark-free-url url)))
-                 (set! resp _resp)
-                 (set! body _body))
-        (display (string-append ";\tStatus: "
-                                (number->string (response-code resp))))
-        (cond
-          ((equal? (response-code resp) 200)
-           (values (build-response
-                     #:code 200
-                     #:headers `((content-type .
-                                  ,(response-content-type resp))
-                                 (cache-control .
-                                  ,(parse-header 'cache-control
-                                                 "max-age=604800"))))
-                   body))
-          ((and (>= (response-code resp) 300) (<= (response-code resp) 399))
-           (values (build-response
-                     #:code (response-code resp)
-                     #:headers `((location . ,(parse-header
-                                                'location
-                                                (uri-path
-                                                  (response-location
-                                                    resp))))
-                                 (content-type .
-                                  ,(response-content-type resp))))
-                   "Redirect"))
-          (else (error-page (upstream-status (response-code resp)))))))
+        (lambda ()
+          (receive (resp body)
+              (fetch-media (if vid uri (string->uri (watermark-free-url url))))
+            (display (string-append ";\tStatus: "
+                                    (number->string (response-code resp))))
+            (if (= (response-code resp) 200)
+              (values (build-response
+                        #:code 200
+                        #:headers `((content-type .
+                                     ,(response-content-type resp))
+                                    (cache-control .
+                                     ,(parse-header 'cache-control
+                                                    "max-age=604800"))))
+                      body)
+              (error-page (upstream-status (response-code resp)))))))
       (error-page 400))))
