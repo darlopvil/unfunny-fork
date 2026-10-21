@@ -85,7 +85,7 @@
   (values (build-response
             #:code code
             #:headers `((content-type . (text/html))))
-          (shtml->html (error-template code))))
+          (render (error-template code))))
 
 ;; Raw (undecoded) value of KEY in a query string, or #f.  Tolerates a
 ;; missing query, empty parts and parameters without '='.
@@ -129,10 +129,15 @@
 (define feed-ttl 600)
 (define home-failure-ttl 60)
 
-;; shtml->html escapes '&' in text and leaves it as it is in attribute values,
-;; where browsers read it fine, so the HTML is served as it comes.
+;; Every page gets a doctype, without which browsers render in quirks mode,
+;; and its language.  shtml->html escapes '&' in text and leaves it as it is
+;; in attribute values, where browsers read it fine.
 (define (render shtml)
-  (shtml->html shtml))
+  (shtml->html
+    (if (and (pair? shtml) (eq? (car shtml) 'html))
+      `(*TOP* (*DECL* DOCTYPE html)
+              (html (@ (lang "en")) ,@(cdr shtml)))
+      shtml)))
 
 ;; The cached page under KEY, or else the result of THUNK, which renders it
 ;; (and caches it if it wants to).  Concurrent misses share one THUNK call.
