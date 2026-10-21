@@ -153,15 +153,18 @@
 
 (define (channel-page path)
   (display ";\tHandler: channel-page")
-  (generic-page feed-template path feed-ttl))
+  (generic-page (lambda (state) (feed-template (gather-channel state)))
+                path feed-ttl))
 
 (define (featured-page path)
   (display ";\tHandler: featured-page")
-  (generic-page feed-template path feed-ttl))
+  (generic-page (lambda (state) (feed-template (gather-featured state)))
+                path feed-ttl))
 
 (define (tag-page path)
   (display ";\tHandler: tag-page")
-  (generic-page feed-template path feed-ttl))
+  (generic-page (lambda (state) (feed-template (gather-tag state)))
+                path feed-ttl))
 
 ;; iFunny's channel list, as last seen in one of its pages.  Further pages of
 ;; channels come from the API, whose answers do not include it.
@@ -180,53 +183,146 @@
                               (number->string (response-code response))))
       (remember-cookies! response))))
 
+(define (without key alist)
+  (remove (lambda (entry) (equal? (car entry) key)) alist))
+
+(define (feed-items state)
+  (let ((items (ref state "feed" "items")))
+    (if (vector? items) (vector->list items) '())))
+
 ;; STATE with its feed's items and pagination replaced.
 (define (with-feed state items pagination)
   (acons "feed"
          (acons "items" (list->vector items)
                 (acons "pagination" pagination
-                       (remove (lambda (entry)
-                                 (member (car entry) '("items" "pagination")))
-                               (or (ref state "feed") '()))))
-         (remove (lambda (entry) (equal? (car entry) "feed")) state)))
+                       (without "items"
+                                (without "pagination"
+                                         (or (ref state "feed") '())))))
+         (without "feed" state)))
 
-;; A profile's pages hold very few posts (often 1 to 3, it is iFunny's page
-;; size).  The rest of the timeline comes from the API, so each UNfunny page
-;; gathers up to timeline-target posts with at most timeline-calls more
-;; requests.  Any failure just stops gathering: what is there is shown.
-(define timeline-target 10)
-(define timeline-calls 3)
+;; STATE with the Featured page number its next page link counts from.
+(define (with-featured-page state page)
+  (let ((route (or (ref state "route") '())))
+    (acons "route"
+           (acons "params"
+                  (acons "page" (number->string page)
+                         (without "page" (or (ref route "params") '())))
+                  (without "params" route))
+           (without "route" state))))
 
-(define (gather-timeline state)
+;; iFunny's batches can overlap; keeps the first of each post.
+(define (unique-posts items)
+  (delete-duplicates items
+                     (lambda (a b)
+                       (let ((a (ref a "id")) (b (ref b "id")))
+                         (and (string? a) (equal? a b))))))
+
+;; iFunny's feed pages are small: 5 posts for tags, 6 for channels, 10 for
+;; Featured and 1 to 3 for profiles.  Its web client loads further batches
+;; as you scroll, and its API ignores any limit.  So each UNfunny page
+;; gathers up to page-target posts, asking the API for at most
+;; extra-batches more batches.  Any failure just stops gathering: what is
+;; there is shown.
+(define page-target 20)
+(define extra-batches 3)
+
+;; The API's next batch for a cursor feed ("items" and "pagination"), via
+;; PATH-FOR, which builds the API path for a cursor.  #f at the end.
+(define (cursor-batch path-for renew)
+  (lambda (pagination)
+    (let ((next (ref pagination "next")))
+      (and (eq? (ref pagination "hasNext") #t)
+           (non-empty-string? next)
+           (api-get (path-for next) renew)))))
+
+;; STATE with up to page-target posts, the extra ones from BATCH, which
+;; takes the pagination so far.
+(define (gather state batch)
+  (let loop ((items (feed-items state))
+             (pagination (ref state "feed" "pagination"))
+             (batches 0))
+    (let ((data (and (< (length items) page-target)
+                     (< batches extra-batches)
+                     (api-available?)
+                     (catch #t
+                       (lambda () (batch pagination))
+                       (lambda _ #f)))))
+      (if (and data
+               (vector? (ref data "items"))
+               (> (vector-length (ref data "items")) 0))
+        (loop (append items (vector->list (ref data "items")))
+              (ref data "pagination")
+              (1+ batches))
+        (with-feed state (unique-posts items) pagination)))))
+
+(define (gather-tag state)
+  (let ((tag (ref state "route" "params" "tag")))
+    (if (non-empty-string? tag)
+      (gather state
+              (cursor-batch (lambda (next)
+                              (string-append "/v1/feeds/tags/"
+                                             (uri-encode tag) "?next=" next))
+                            (renew-session
+                              (string-append "/tags/" (uri-encode tag)))))
+      state)))
+
+(define (gather-channel state)
+  (let ((channel (ref state "route" "params" "channel")))
+    (if (non-empty-string? channel)
+      (gather state
+              (cursor-batch (lambda (next)
+                              (string-append "/v1/feeds/channels/"
+                                             (uri-encode channel)
+                                             "?next=" next))
+                            (renew-session
+                              (string-append "/channels/"
+                                             (uri-encode channel)))))
+      state)))
+
+(define (gather-user state)
   (let ((nick (ref state "user" "data" "nick")))
-    (let loop ((items (let ((items (ref state "feed" "items")))
-                        (if (vector? items) (vector->list items) '())))
-               (pagination (ref state "feed" "pagination"))
-               (calls 0))
-      (let ((next (ref pagination "next")))
-        (if (and (< (length items) timeline-target)
-                 (< calls timeline-calls)
-                 (non-empty-string? nick)
-                 (eq? (ref pagination "hasNext") #t)
-                 (non-empty-string? next)
-                 (api-available?))
-          (let ((data (catch #t
-                        (lambda ()
-                          (api-get (string-append "/v1/user/" (uri-encode nick)
-                                                  "/timeline/" next)
-                                   (renew-session
-                                     (string-append "/user/" (uri-encode nick)))))
-                        (lambda _ #f))))
-            (if (and data (vector? (ref data "items")))
-              (loop (append items (vector->list (ref data "items")))
-                    (ref data "pagination")
-                    (1+ calls))
-              (with-feed state items pagination)))
-          (with-feed state items pagination))))))
+    (if (non-empty-string? nick)
+      (gather state
+              (cursor-batch (lambda (next)
+                              (string-append "/v1/user/" (uri-encode nick)
+                                             "/timeline/" next))
+                            (renew-session
+                              (string-append "/user/" (uri-encode nick)))))
+      state)))
+
+;; Featured pages go by number: an UNfunny page shows iFunny's page and as
+;; many following ones as fit, and its next link counts from the last one.
+(define (gather-featured state)
+  (let ((pages (ref state "feed" "pageCount")))
+    (let loop ((items (feed-items state))
+               (page (or (let ((page (ref state "route" "params" "page")))
+                           (and (string? page) (string->number page)))
+                         1))
+               (batches 0))
+      (let ((data (and (< (length items) page-target)
+                       (< batches extra-batches)
+                       (integer? pages)
+                       (< page pages)
+                       (api-available?)
+                       (catch #t
+                         (lambda ()
+                           (api-get (string-append "/v1/feeds/featured?page="
+                                                   (number->string (1+ page)))
+                                    (renew-session "/")))
+                         (lambda _ #f)))))
+        (if (and data
+                 (vector? (ref data "items"))
+                 (> (vector-length (ref data "items")) 0))
+          (loop (append items (vector->list (ref data "items")))
+                (1+ page)
+                (1+ batches))
+          (with-featured-page
+            (with-feed state (unique-posts items) (ref state "feed" "pagination"))
+            page))))))
 
 (define (user-page path)
   (display ";\tHandler: user-page")
-  (generic-page (lambda (state) (user-template (gather-timeline state)))
+  (generic-page (lambda (state) (user-template (gather-user state)))
                 path feed-ttl))
 
 ;; Further pages of a channel, from the API (its HTML routes do not take the
@@ -255,7 +351,7 @@
                                      ("name" . ,name)))
                           ("route" . (("name" . "PagePaginatedChannel")
                                       ("params" . (("channel" . ,channel)))))))
-                 (html (render (feed-template state))))
+                 (html (render (feed-template (gather-channel state)))))
             (cache-put! path html feed-ttl)
             (values good-response html)))))))
 
@@ -281,7 +377,8 @@
                                                   (symbol->string key)))
                           #f)))
                (html (catch #t
-                       (lambda () (render (home-template state)))
+                       (lambda ()
+                         (render (home-template (gather-featured state))))
                        (lambda _
                          (set! state #f)
                          (render (home-template #f))))))
