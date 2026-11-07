@@ -108,10 +108,10 @@
 ;; Where the next page of a feed is, following iFunny's own routes for them:
 ;; /page<N> for Featured, /tags/<tag>/<cursor> and /user/<nick>/timeline/
 ;; <cursor>.  Those routes only take numeric cursors, the ones tags and
-;; profiles use.  Channels use hex cursors that only iFunny's API takes, so
-;; their /channels/<channel>/<cursor> pages are UNfunny's own, and their
-;; link is hidden while the API refuses requests.  #f when there is no next
-;; page.
+;; profiles use.  Channels hand out either a 24-digit hex id or a 10-digit
+;; timestamp, depending on the hour; their /channels/<channel>/<cursor>
+;; pages are UNfunny's own, built from the API, so their link is hidden
+;; while the API refuses requests.  #f when there is no next page.
 (define (next-page-path state)
   (let* ((route (ref state "route" "name"))
          (params (ref state "route" "params"))
@@ -135,7 +135,7 @@
        (string-append "/tags/" (uri-encode (ref params "tag")) "/" next))
       ((and (member route '("PageChannel" "PagePaginatedChannel"))
             (non-empty-string? (ref params "channel"))
-            (cursor? "^[0-9a-f]{24}$")
+            (cursor? channel-cursor-pattern)
             (api-available?))
        (string-append "/channels/" (uri-encode (ref params "channel"))
                       "/" next))
@@ -146,8 +146,18 @@
                       "/timeline/" next))
       (else #f))))
 
+;; When iFunny says there is a next page but no link can be built for it,
+;; the request's log line says why, with the cursor iFunny sent.
 (define (next-link state)
   (let ((path (next-page-path state)))
+    (when (and (not path)
+               (eq? (ref state "feed" "pagination" "hasNext") #t))
+      (display (string-append
+                 ";\tNext: hidden ("
+                 (let ((next (ref state "feed" "pagination" "next")))
+                   (if (string? next) next (object->string next)))
+                 (if (api-available?) "" ", API paused")
+                 ")")))
     (if path
       `((p (@ (class "next")) (a (@ (href ,path)) "Next page")))
       '())))

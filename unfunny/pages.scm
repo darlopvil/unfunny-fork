@@ -272,7 +272,8 @@
            (api-get (path-for next) renew)))))
 
 ;; STATE with up to page-target posts, the extra ones from BATCH, which
-;; takes the pagination so far.
+;; takes the pagination so far.  A failed batch leaves its cause in the
+;; request's log line.
 (define (gather state batch)
   (let loop ((items (feed-items state))
              (pagination (ref state "feed" "pagination"))
@@ -282,7 +283,10 @@
                      (api-available?)
                      (catch #t
                        (lambda () (batch pagination))
-                       (lambda _ #f)))))
+                       (lambda (key . args)
+                         (display (string-append ";\tBatch: "
+                                                 (symbol->string key)))
+                         #f)))))
       (if (and data
                (vector? (ref data "items"))
                (> (vector-length (ref data "items")) 0))

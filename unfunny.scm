@@ -20,6 +20,7 @@
 
 (define-module (unfunny)
   #:use-module (unfunny pages)
+  #:use-module ((unfunny scraping) #:select (channel-cursor-pattern))
   #:use-module (unfunny server)
   #:use-module (web uri)
   #:use-module (web request)
@@ -70,7 +71,7 @@
        (channel-page path))
       ((and (= (length path-components) 3)
             (equal? (car path-components) "channels"))
-       (if (string-match "^[0-9a-f]{24}$" (caddr path-components))
+       (if (string-match channel-cursor-pattern (caddr path-components))
          (channel-next-page path (cadr path-components)
                             (caddr path-components))
          (error-page 404)))

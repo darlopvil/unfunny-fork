@@ -36,6 +36,7 @@
             video-post?
             gif-post?
             local-path
+            channel-cursor-pattern
             proxy))
 
 (define state-marker "window.__INITIAL_STATE__=")
@@ -104,6 +105,10 @@
                ((equal? (uri-host uri) "br.ifunny.co")
                 (string-append "/br" (uri-path uri)))
                (else #f)))))
+
+;; Cursors iFunny's channel feeds hand out: a 24-digit hex id or, at some
+;; hours, a 10-digit timestamp like the ones tags use.
+(define channel-cursor-pattern "^([0-9a-f]{24}|[0-9]{10})$")
 
 ;; Characters left as they are in the url parameter of proxy links.  ':' and
 ;; '/' are safe inside a query and keep the links readable; everything else
