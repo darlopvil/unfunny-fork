@@ -27,20 +27,31 @@
 (define-module (unfunny cache)
   #:use-module (ice-9 threads)
   #:use-module (srfi srfi-9)
-  #:export (cache-ref cache-put! shared-flight))
+  #:export (cache-ref cache-stale-ref cache-put! cache-refresh! shared-flight))
 
 (define max-entries 500)
 
 (define lock (make-mutex))
-(define table (make-hash-table))   ; key -> (expiry . value)
+(define table (make-hash-table))   ; key -> (expiry born . value)
 
 ;; The value stored under KEY, or #f if there is none or it has expired.
+;; Expired entries stay until room is needed, so cache-stale-ref can still
+;; hand them out when iFunny fails.
 (define (cache-ref key)
   (with-mutex lock
     (let ((entry (hash-ref table key)))
-      (cond ((not entry) #f)
-            ((> (car entry) (current-time)) (cdr entry))
-            (else (hash-remove! table key) #f)))))
+      (and entry
+           (> (car entry) (current-time))
+           (cddr entry)))))
+
+;; The value stored under KEY, expired or not, as long as it was stored at
+;; most MAX-AGE seconds ago; #f otherwise.
+(define (cache-stale-ref key max-age)
+  (with-mutex lock
+    (let ((entry (hash-ref table key)))
+      (and entry
+           (<= (- (current-time) (cadr entry)) max-age)
+           (cddr entry)))))
 
 ;; Stores VALUE under KEY for TTL seconds.
 (define (cache-put! key value ttl)
@@ -48,7 +59,16 @@
     (unless (hash-ref table key)
       (when (>= (hash-count (const #t) table) max-entries)
         (make-room!)))
-    (hash-set! table key (cons (+ (current-time) ttl) value))))
+    (let ((now (current-time)))
+      (hash-set! table key (cons (+ now ttl) (cons now value))))))
+
+;; Keeps the value under KEY for TTL more seconds, without making it any
+;; younger for cache-stale-ref.
+(define (cache-refresh! key ttl)
+  (with-mutex lock
+    (let ((entry (hash-ref table key)))
+      (when entry
+        (hash-set! table key (cons (+ (current-time) ttl) (cdr entry)))))))
 
 ;; Called with the lock held.  Drops expired entries, then, if the cache is
 ;; still full, the quarter of entries closest to expiring.

@@ -129,6 +129,23 @@
 (define feed-ttl 600)
 (define home-failure-ttl 60)
 
+;; When iFunny fails, the last good copy of a page is served instead of an
+;; error, and kept for stale-retry seconds before asking iFunny again.  Only
+;; copies up to stale-max-age old are used: a brief failure goes unnoticed,
+;; a long one still shows, to visitors and to monitoring.
+(define stale-retry 60)
+(define stale-max-age 3600)
+
+(define (or-stale key response body)
+  (let ((stale (and (>= (response-code response) 500)
+                    (cache-stale-ref key stale-max-age))))
+    (if stale
+      (begin
+        (display ";\tStale: served")
+        (cache-refresh! key stale-retry)
+        (values good-response stale))
+      (values response body))))
+
 ;; Every page gets a doctype, without which browsers render in quirks mode,
 ;; and its language.  shtml->html escapes '&' in text and leaves it as it is
 ;; in attribute values, where browsers read it fine.
@@ -141,13 +158,19 @@
 
 ;; The cached page under KEY, or else the result of THUNK, which renders it
 ;; (and caches it if it wants to).  Concurrent misses share one THUNK call.
+;; If THUNK fails, the last good copy is served when there is one.
 (define (cached-page key thunk)
   (let ((cached (cache-ref key)))
     (if cached
       (begin
         (display ";\tCache: hit")
         (values good-response cached))
-      (shared-flight key thunk (lambda () (error-page 502))))))
+      (shared-flight key
+                     (lambda ()
+                       (call-with-values thunk
+                         (lambda (response body)
+                           (or-stale key response body))))
+                     (lambda () (error-page 502))))))
 
 ;; Pages are cached by path: the same path always maps to the same iFunny
 ;; page.  Only successful pages are stored, so a failure is retried on the
@@ -395,8 +418,8 @@
             (cache-put! path html feed-ttl)
             (values good-response html)))))))
 
-;; The home page always answers: if Featured cannot be loaded it still shows
-;; the usage instructions, with a note instead of the feed.
+;; The home page always answers: if Featured cannot be loaded it shows the
+;; last good home page, or a note when there is none yet.
 (define (home-page)
   (display ";\tHandler: home-page")
   (let ((key "home"))
@@ -421,9 +444,22 @@
                          (render (home-template (gather-featured state))))
                        (lambda _
                          (set! state #f)
-                         (render (home-template #f))))))
-          (cache-put! key html (if state feed-ttl home-failure-ttl))
-          (values good-response html))))))
+                         #f)))
+               (good (cache-stale-ref "home:good" stale-max-age)))
+          (cond
+            (state
+             (cache-put! key html feed-ttl)
+             (cache-put! "home:good" html feed-ttl)
+             (values good-response html))
+            ;; Featured failed: the last good home page, if there is one.
+            (good
+             (display ";\tStale: served")
+             (cache-put! key good home-failure-ttl)
+             (values good-response good))
+            (else
+             (let ((note (render (home-template #f))))
+               (cache-put! key note home-failure-ttl)
+               (values good-response note)))))))))
 
 ;; iFunny's own image service crops the 20px watermark strip off the bottom
 ;; of a picture and returns it in its original format, so nothing has to be
