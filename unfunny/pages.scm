@@ -187,7 +187,7 @@
                    (string-append "https://br.ifunny.co" (string-drop path 3))
                    (string-append "https://ifunny.co" path))))
         (receive (_resp _body)
-                 (fetch url)
+                 (page-fetch url)
                  (set! resp _resp)
                  (set! body _body))
         (remember-cookies! resp)
@@ -237,7 +237,7 @@
 ;; Fetches one of iFunny's HTML pages only for the session it sets.
 (define (renew-session path)
   (lambda ()
-    (receive (response body) (fetch (string-append "https://ifunny.co" path))
+    (receive (response body) (page-fetch (string-append "https://ifunny.co" path))
       (display (string-append ";\tSession: "
                               (number->string (response-code response))))
       (remember-cookies! response))))
@@ -428,7 +428,7 @@
       (lambda ()
         (let* ((state (catch #t
                         (lambda ()
-                          (receive (response body) (fetch "https://ifunny.co/")
+                          (receive (response body) (page-fetch "https://ifunny.co/")
                             (remember-cookies! response)
                             (display (string-append
                                        ";\tStatus: "

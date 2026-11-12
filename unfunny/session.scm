@@ -26,6 +26,10 @@
 ;;
 ;; When the API keeps refusing, api-available? turns false for an hour, so
 ;; the links that depend on it disappear instead of leading to error pages.
+;;
+;; Every request to ifunny.co also carries sound=off.  Since November 2026
+;; iFunny answers a request without it with a tiny page whose script sets
+;; that cookie and reloads; a browser gets through, UNfunny would not.
 
 (define-module (unfunny session)
   #:use-module (unfunny upstream)
@@ -36,6 +40,7 @@
   #:use-module (ice-9 receive)
   #:use-module (srfi srfi-1)
   #:export (remember-cookies!
+            page-fetch
             api-available?
             api-get))
 
@@ -73,6 +78,20 @@
                       (remove (lambda (cookie) (assoc (car cookie) found))
                               cookies)))))))
 
+;; The Cookie header for ifunny.co: sound=off, which its cookie gate asks
+;; for, and the anonymous session once there is one.
+(define (cookie-header)
+  (string-join
+    (cons "sound=off"
+          (map (lambda (cookie)
+                 (string-append (car cookie) "=" (cdr cookie)))
+               (with-mutex lock cookies)))
+    "; "))
+
+;; Fetches one of iFunny's HTML pages, with the cookies a browser would send.
+(define (page-fetch url)
+  (fetch url #:headers `((cookie . ,(cookie-header)))))
+
 (define (session-ready?)
   (with-mutex lock
     (every (lambda (name) (assoc name cookies)) session-cookie-names)))
@@ -96,12 +115,7 @@
                `((accept (application/json))
                  (x-requested-with . "fetch")
                  (x-csrf-token . ,token)
-                 (cookie . ,(string-join
-                              (map (lambda (cookie)
-                                     (string-append (car cookie) "="
-                                                    (cdr cookie)))
-                                   current)
-                              "; "))))
+                 (cookie . ,(cookie-header))))
       (values (response-code response) body))))
 
 ;; The parsed JSON the API answers for PATH ("/v1/..."), or throws
